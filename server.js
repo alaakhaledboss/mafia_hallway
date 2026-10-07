@@ -303,16 +303,14 @@ function resolveVoting() {
         message = `لم يتم إعدام أي شخص (تعادل في الأصوات).`;
     }
 
-    if (checkWinConditions()) {
-        gameState = 'DAY_RESULTS';
-        io.emit('voting_summary', { message });
-        broadcastUpdate();
-        return;
-    }
-
     gameState = 'DAY_RESULTS';
     io.emit('voting_summary', { message });
     broadcastUpdate();
+
+    // Check if this execution ended the game
+    if (checkWinConditions()) {
+        return; // Stop here so it doesn't loop back into the night phase!
+    }
 
     setTimeout(() => {
         if (gameState === 'GAME_OVER') return;

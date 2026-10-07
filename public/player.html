@@ -2,245 +2,207 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mafia Player</title>
+    <title>لعبة المافيا - شاشة اللاعب</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
 </head>
-<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col items-center justify-center p-4">
-
-    <!-- JOIN SCREEN -->
-    <div id="join-screen" class="w-full max-w-sm bg-gray-950 border border-gray-800 p-6 rounded-2xl shadow-2xl text-center space-y-4">
-        <h1 class="text-xl font-black text-red-500 tracking-wider">MAFIA PLAYER</h1>
-        <p class="text-xs text-gray-400">Enter your nickname to join the game session</p>
-        
-        <input type="text" id="nickname" placeholder="Your Name" 
-            class="w-full bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-sm text-center text-white focus:outline-none focus:border-red-600 transition">
-        
-        <button id="join-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-red-900/40">
-            Join Game
-        </button>
+<body class="bg-gray-950 text-gray-100 min-h-screen p-4 font-sans flex flex-col items-center justify-center">
+    
+    <!-- Join Form Card -->
+    <div id="joinContainer" class="w-full max-w-md bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl space-y-4 text-center">
+        <h1 class="text-xl font-black text-red-500">انضم إلى لعبة المافيا</h1>
+        <p class="text-xs text-gray-400">أدخل اسمك المستعار للانضمام إلى اللعبة أو إعادة الاتصال.</p>
+        <input type="text" id="nicknameInput" placeholder="اسمك المستعار..." class="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-sm text-white text-center focus:outline-none focus:border-red-600">
+        <button onclick="joinGame()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition text-sm">انضمام</button>
+        <p id="errorMsg" class="text-red-500 text-xs font-semibold"></p>
     </div>
 
-    <!-- GAME SCREEN -->
-    <div id="game-screen" class="hidden w-full max-w-sm bg-gray-950 border border-gray-800 p-6 rounded-2xl shadow-2xl text-center space-y-4">
-        <div>
-            <span class="text-[10px] uppercase font-bold tracking-widest text-gray-500">Your Role</span>
-            <div id="my-role" class="text-xl font-black mt-1 text-gray-200">Waiting...</div>
+    <!-- Game Interface Card -->
+    <div id="gameContainer" class="w-full max-w-md bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl space-y-4 hidden">
+        <div class="text-center pb-3 border-b border-gray-800">
+            <span class="text-[10px] uppercase font-bold text-gray-500 block">دورك في اللعبة</span>
+            <h2 id="roleDisplay" class="text-lg font-black text-yellow-400 mt-1">انتظار بدء اللعبة...</h2>
+            <div id="mayorActionContainer" class="mt-2 hidden">
+                <button onclick="socket.emit('mayor_reveal')" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs font-bold w-full transition">كشف هويتي كعمدة (يصبح صوتك 3 أصوات)</button>
+            </div>
         </div>
 
-        <div id="action-container" class="border-t border-gray-800 pt-4">
-            <p class="text-xs text-gray-500 italic">Waiting for host to start the game...</p>
+        <div id="actionContainer" class="space-y-3 min-h-[150px] flex flex-col justify-center text-center">
+            <p class="text-xs text-gray-400">في انتظار تحرك المضيف وبدء الجولات...</p>
         </div>
     </div>
 
     <script>
         const socket = io();
-
-        const joinScreen = document.getElementById('join-screen');
-        const gameScreen = document.getElementById('game-screen');
-        const nicknameInput = document.getElementById('nickname');
-        const joinBtn = document.getElementById('join-btn');
-        const myRole = document.getElementById('my-role');
-        const actionContainer = document.getElementById('action-container');
-
-        let assignedRole = null;
-        let mySocketId = null;
+        let myRole = null;
         let isAlive = true;
 
-        socket.on('connect', () => {
-            mySocketId = socket.id;
-        });
-
-        joinBtn.onclick = () => {
-            const name = nicknameInput.value.trim();
-            if (!name) return;
-            
-            joinBtn.disabled = true;
-            joinBtn.classList.add('opacity-50', 'cursor-not-allowed');
-
+        function joinGame() {
+            let name = document.getElementById('nicknameInput').value;
+            if (!name.trim()) return;
             socket.emit('join_game', name);
+        }
 
-            joinScreen.classList.add('hidden');
-            gameScreen.classList.remove('hidden');
-            myRole.textContent = 'Waiting for host to start...';
-        };
-
-        socket.on('state_update', (data) => {
-            if (data.gameState === 'LOBBY') return;
-
-            let me = data.players.find(function(p) { return p.id === mySocketId; });
-            if (me) {
-                isAlive = me.isAlive;
-                if (!isAlive) {
-                    myRole.classList.add('line-through', 'text-gray-600');
-                }
-            }
+        socket.on('join_success', () => {
+            document.getElementById('joinContainer').classList.add('hidden');
+            document.getElementById('gameContainer').classList.remove('hidden');
         });
 
-        socket.on('reset_client', () => {
-            joinBtn.disabled = false;
-            joinBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            joinScreen.classList.remove('hidden');
-            gameScreen.classList.add('hidden');
-            nicknameInput.value = '';
-            myRole.textContent = 'Waiting...';
-            myRole.className = 'text-xl font-black mt-1 text-gray-200';
-            actionContainer.innerHTML = '';
+        socket.on('error_message', (msg) => {
+            document.getElementById('errorMsg').innerText = msg;
         });
 
         socket.on('your_role', (data) => {
-            assignedRole = data.role;
-            myRole.textContent = assignedRole;
-            if (assignedRole === 'Mafia') {
-                myRole.className = 'text-xl font-black mt-1 text-red-500';
-            } else if (assignedRole === 'Doctor') {
-                myRole.className = 'text-xl font-black mt-1 text-green-400';
-            } else {
-                myRole.className = 'text-xl font-black mt-1 text-blue-400';
+            myRole = data.role;
+            let roleNameAr = myRole;
+            if (myRole === 'Mafia') roleNameAr = 'مافيا (شريّر)';
+            else if (myRole === 'Doctor') roleNameAr = 'الطبيب';
+            else if (myRole === 'Mayor') roleNameAr = 'عمدة القرية';
+            else if (myRole === 'Detective') roleNameAr = 'المحقق';
+            else if (myRole === 'Citizen') roleNameAr = 'مواطن بريء';
+
+            document.getElementById('roleDisplay').innerText = roleNameAr;
+
+            if (myRole === 'Mayor' && !data.mayorRevealed) {
+                document.getElementById('mayorActionContainer').classList.remove('hidden');
             }
         });
 
+        socket.on('player_died', () => {
+            isAlive = false;
+            document.getElementById('actionContainer').innerHTML = '<div class="p-4 bg-red-950/40 border border-red-800 rounded-xl"><p class="text-sm font-bold text-red-400">أنت ميت 💀</p><p class="text-[11px] text-gray-400 mt-1">لا يمكنك التصويت أو تنفيذ عمليات، ولكن يمكنك متابعة مجريات اللعبة.</p></div>';
+        });
+
+        socket.on('announcement', (msg) => {
+            if (myRole === 'Mayor') {
+                document.getElementById('mayorActionContainer').classList.add('hidden');
+            }
+        });
+
+        // Mafia Night Action
         socket.on('trigger_night_mafia', (data) => {
-            if (!isAlive) {
-                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><p class="text-xs text-red-400 font-bold">لقد مت 💀</p><p class="text-[10px] text-gray-500 mt-1">أنت ميت ولا يمكنك المشاركة أو التصويت.</p></div>';
-                return;
+            if (!isAlive) return;
+            let actionContainer = document.getElementById('actionContainer');
+            if (myRole === 'Mafia') {
+                let targetsHtml = data.players
+                    .filter(p => p.id !== socket.id)
+                    .map(p => `<button onclick="socket.emit('mafia_action', { targetId: '${p.id}' })" class="bg-red-900/50 hover:bg-red-900 border border-red-700 text-white p-2 rounded text-xs font-semibold w-full mb-1">تصفية ${p.name}</button>`)
+                    .join('');
+                actionContainer.innerHTML = '<h3 class="text-xs font-bold text-red-400 mb-2">🌙 مرحلة الليل: اختر شخصاً لتصفيته</h3>' + targetsHtml + '<div id="mafiaLog" class="text-[11px] text-gray-400 mt-2">في انتظار اختيار باقي أفراد المافيا...</div>';
+            } else {
+                actionContainer.innerHTML = '<p class="text-xs text-gray-400 font-bold">القرية نائمة الآن.. المافيا تخطط لجريمتها 🌙</p>';
             }
-            if (assignedRole !== 'Mafia') {
-                actionContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Night phase in progress. Mafia are choosing...</p>';
-                return;
-            }
-
-            actionContainer.innerHTML = '<div class="text-xs font-bold text-red-400 mb-2">NIGHT: CHOOSE TARGET TO ELIMINATE</div>';
-            data.players.forEach(function(p) {
-                if (p.id === socket.id) return;
-
-                const btn = document.createElement('button');
-                btn.className = 'w-full py-2 bg-gray-800 hover:bg-red-900 rounded-lg text-xs mb-2 transition text-white';
-                btn.textContent = 'Eliminate ' + p.name;
-                btn.onclick = function() {
-                    socket.emit('mafia_action', { targetId: p.id });
-                    actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Target submitted! Waiting for other Mafia...</p>';
-                };
-                actionContainer.appendChild(btn);
-            });
         });
 
+        socket.on('mafia_live_log', (logs) => {
+            let logEl = document.getElementById('mafiaLog');
+            if (logEl) {
+                let text = logs.map(l => `${l.mafiaName} يريد قتل الهدف`).join(' | ');
+                logEl.innerText = text;
+            }
+        });
+
+        // Doctor Night Action
         socket.on('trigger_night_doctor', (data) => {
             if (!isAlive) return;
-            if (assignedRole !== 'Doctor') {
-                actionContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Doctor is making a save...</p>';
-                return;
+            let actionContainer = document.getElementById('actionContainer');
+            if (myRole === 'Doctor') {
+                let targetsHtml = data.players
+                    .map(p => `<button onclick="socket.emit('doctor_action', '${p.id}')" class="bg-green-900/50 hover:bg-green-900 border border-green-700 text-white p-2 rounded text-xs font-semibold w-full mb-1">معالجة ${p.name}</button>`)
+                    .join('');
+                actionContainer.innerHTML = '<h3 class="text-xs font-bold text-green-400 mb-2">💊 مرحلة الطبيب: اختر شخصاً لحمايته</h3>' + targetsHtml;
+            } else {
+                actionContainer.innerHTML = '<p class="text-xs text-gray-400 font-bold">الطبيب يقوم بعمله الآن...</p>';
             }
-
-            actionContainer.innerHTML = '<div class="text-xs font-bold text-green-400 mb-2">NIGHT: CHOOSE SOMEONE TO HEAL</div>';
-            data.players.forEach(function(p) {
-                const btn = document.createElement('button');
-                btn.className = 'w-full py-2 bg-gray-800 hover:bg-green-900 rounded-lg text-xs mb-2 transition text-white';
-                btn.textContent = 'Heal ' + p.name;
-                btn.onclick = function() {
-                    socket.emit('doctor_action', p.id);
-                    actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Heal submitted! Wrapping up night...</p>';
-                };
-                actionContainer.appendChild(btn);
-            });
         });
 
+        // Detective Night Action
+        socket.on('trigger_night_detective', (data) => {
+            if (!isAlive) return;
+            let actionContainer = document.getElementById('actionContainer');
+            if (myRole === 'Detective') {
+                let targetsHtml = data.players
+                    .filter(p => p.id !== socket.id)
+                    .map(p => `<button onclick="socket.emit('detective_action', '${p.id}')" class="bg-blue-900/50 hover:bg-blue-900 border border-blue-700 text-white p-2 rounded text-xs font-semibold w-full mb-1">إطلاق رصاصة على ${p.name}</button>`)
+                    .join('');
+                actionContainer.innerHTML = '<h3 class="text-xs font-bold text-blue-400 mb-2">🔫 دور المحقق: لديك رصاصة واحدة!</h3>' + targetsHtml + '<button onclick="socket.emit(\'detective_action\', null)" class="bg-gray-800 hover:bg-gray-700 text-gray-300 p-2 rounded text-xs w-full mt-2">تخطي وعدم إطلاق النار</button>';
+            } else {
+                actionContainer.innerHTML = '<p class="text-xs text-gray-400 font-bold">المحقق يتخذ قراره الليلي...</p>';
+            }
+        });
+
+        // Speaker / Discussion phase
         socket.on('speaker_update', (data) => {
-            if (!isAlive) {
-                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><p class="text-xs text-red-400 font-bold">أنت ميت 💀</p><p class="text-[10px] text-gray-500 mt-1">الموتى لا يتحدثون ولا يصوتون.</p></div>';
-                return;
-            }
-
-            if (!data.currentSpeaker) {
-                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><h3 class="text-xs font-bold text-yellow-400">Discussion Finished</h3><p class="text-xs text-gray-300 mt-1">Waiting for host to start voting...</p></div>';
-                return;
-            }
-
-            let isMe = data.currentSpeaker.id === mySocketId;
-            let speakerText = isMe ? '🎤 الدور عليك لتتحدث الآن!' : '🎤 المتحدث الحالي: ' + data.currentSpeaker.name;
-            let textClass = isMe ? 'text-green-400 text-base animate-pulse' : 'text-gray-200';
-
-            actionContainer.innerHTML = 
-                '<div class="p-4 bg-gray-950 rounded-xl border border-gray-800 space-y-2">' +
-                    '<h3 class="text-xs font-bold text-yellow-400 uppercase">مرحلة النقاش (تمرير المايك)</h3>' +
-                    '<p class="text-sm font-bold ' + textClass + '">' + speakerText + '</p>' +
-                    '<span class="text-[10px] text-gray-500 block">Speaker ' + (data.speakerIndex + 1) + ' of ' + data.totalLiving + '</span>' +
-                '</div>';
+            if (!isAlive) return;
+            let actionContainer = document.getElementById('actionContainer');
+            let currentName = data.currentSpeaker ? data.currentSpeaker.name : 'لا أحد';
+            actionContainer.innerHTML = `
+                <div class="p-4 bg-gray-950 border border-gray-800 rounded-xl space-y-2">
+                    <h3 class="text-xs font-bold text-blue-400">🗣️ مرحلة النقاش والدفاع</h3>
+                    <p class="text-xs text-gray-300">الدور الحالي في الكلام لـ:</p>
+                    <p class="text-base font-black text-yellow-400">${currentName}</p>
+                    <span class="text-[10px] text-gray-500 block">المتحدث رقم ${data.speakerIndex + 1} من أصل ${data.totalLiving}</span>
+                </div>
+            `;
         });
 
+        // Voting phase
         socket.on('voting_state_update', (data) => {
-            if (!isAlive) {
-                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><p class="text-xs text-red-400 font-bold">أنت ميت 💀</p><p class="text-[10px] text-gray-500 mt-1">لا يمكنك التصويت وأنت ميت.</p></div>';
-                return;
-            }
-
-            let myVoteTarget = data.votes[mySocketId];
-            let isLocked = data.lockedVotes[mySocketId];
-
-            let html = '<div class="space-y-3">' +
-                '<div class="text-xs font-bold text-purple-400 uppercase">Daytime Voting Board ⚖️</div>' +
-                '<p class="text-[10px] text-gray-400">Select who to vote for. You can change your mind until you lock in!</p>' +
-                '<div class="space-y-2 max-h-56 overflow-y-auto pr-1 text-left">';
-
-            data.voteBoardData.forEach(function(p) {
-                let isSelected = myVoteTarget === p.id;
-                let fingersHTML = p.voters.map(function(v) {
-                    return '<span title="' + v.name + '" class="inline-block px-1.5 py-0.5 bg-purple-950 text-purple-300 rounded text-[10px] mr-1 ' + (v.locked ? 'border border-purple-500' : 'opacity-70') + '">👉 ' + v.name + '</span>';
-                }).join('');
-
-                html += '<div class="bg-gray-950 p-2 rounded-xl border ' + (isSelected ? 'border-purple-500' : 'border-gray-800') + ' flex flex-col space-y-1">' +
-                    '<div class="flex justify-between items-center">' +
-                        '<span class="text-xs font-bold text-gray-200">' + p.name + '</span>' +
-                        (!isLocked ? '<button onclick="voteFor(\'' + p.id + '\')" class="px-2 py-1 bg-gray-800 hover:bg-purple-900 rounded text-[10px] text-gray-200 transition">Vote</button>' : '') +
-                    '</div>' +
-                    '<div class="flex flex-wrap gap-1">' + (fingersHTML || '<span class="text-[10px] text-gray-600">No votes yet</span>') + '</div>' +
-                '</div>';
+            if (!isAlive) return;
+            let actionContainer = document.getElementById('actionContainer');
+            
+            let votingHtml = '<div class="text-left space-y-2 max-h-64 overflow-y-auto pr-1"><h3 class="text-xs font-black text-purple-400 uppercase text-center mb-2">⚖️ لوحة التصويت النهارية</h3>';
+            
+            data.voteBoardData.forEach(target => {
+                let votersBadges = target.voters.map(v => `<span class="bg-gray-800 text-[10px] px-1.5 py-0.5 rounded text-gray-300 ml-1">${v.name}${v.locked ? ' ✓' : ''}</span>`).join('');
+                votingHtml += `
+                    <div class="p-3 bg-gray-950 border border-gray-800 rounded-xl flex flex-col space-y-1">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-white">${target.name}</span>
+                            <button onclick="socket.emit('cast_vote', '${target.id}')" class="bg-purple-900/60 hover:bg-purple-900 text-purple-200 px-2 py-1 rounded text-[10px] font-bold">تصويت</button>
+                        </div>
+                        <div class="flex flex-wrap gap-1 mt-1">${votersBadges || '<span class="text-[10px] text-gray-600">لا توجد أصوات بعد</span>'}</div>
+                    </div>
+                `;
             });
 
-            html += '</div>';
-
-            if (myVoteTarget && !isLocked) {
-                html += '<button onclick="lockVote()" class="w-full py-2 bg-purple-600 hover:bg-purple-700 font-bold rounded-xl text-xs transition shadow-lg shadow-purple-900/30 text-white">Lock In Vote 🔒</button>';
-            } else if (isLocked) {
-                html += '<div class="p-2 bg-green-950 border border-green-800 rounded-xl text-xs text-green-400 font-bold">Vote Locked In! 🔒 Waiting for others...</div>';
-            }
-
-            html += '</div>';
-            actionContainer.innerHTML = html;
+            votingHtml += '</div><button onclick="socket.emit(\'lock_vote\')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-xl text-xs mt-2 transition">🔒 قفل التصويت نهائياً</button>';
+            actionContainer.innerHTML = votingHtml;
         });
 
-        window.voteFor = function(targetId) {
-            socket.emit('cast_vote', targetId);
-        };
-
-        window.lockVote = function() {
-            socket.emit('lock_vote');
-        };
-
-        socket.on('night_summary', () => {
+        socket.on('night_summary', (data) => {
             if (!isAlive) return;
-            actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Night concluded. Check the laptop host screen for results!</p>';
+            document.getElementById('actionContainer').innerHTML = `
+                <div class="p-4 bg-gray-950 border border-gray-800 rounded-xl space-y-2">
+                    <h3 class="text-xs font-bold text-yellow-400">☀️ نتائج الليل</h3>
+                    <p class="text-xs text-gray-300">${data.message}</p>
+                </div>
+            `;
         });
 
-        socket.on('voting_summary', () => {
+        socket.on('voting_summary', (data) => {
             if (!isAlive) return;
-            actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Voting concluded. Check the laptop host screen!</p>';
+            document.getElementById('actionContainer').innerHTML = `
+                <div class="p-4 bg-gray-950 border border-gray-800 rounded-xl space-y-2">
+                    <h3 class="text-xs font-bold text-purple-400">⚖️ نتيجة التصويت</h3>
+                    <p class="text-xs text-gray-300">${data.message}</p>
+                </div>
+            `;
         });
 
         socket.on('game_over', (data) => {
             let rolesListHTML = data.roleBreakdown.map(function(p) {
-                let roleColor = p.role === 'Mafia' ? 'text-red-400' : (p.role === 'Doctor' ? 'text-green-400' : 'text-blue-400');
+                let roleColor = p.role === 'Mafia' ? 'text-red-400' : (p.role === 'Doctor' ? 'text-green-400' : (p.role === 'Mayor' ? 'text-yellow-400' : (p.role === 'Detective' ? 'text-blue-400' : 'text-indigo-400')));
                 return '<div class="flex justify-between text-xs py-1 border-b border-gray-800"><span class="font-semibold text-gray-300">' + p.name + '</span> <span class="' + roleColor + ' font-bold">' + p.role + '</span></div>';
             }).join('');
 
-            let winTitle = data.winner === 'Mafia' ? 'Mafia Won !!' : 'Citizens Won !!';
-            actionContainer.innerHTML = 
+            let winTitle = data.winner === 'Mafia' ? 'انتصرت المافيا !!' : 'انتصر المواطنون !!';
+            document.getElementById('actionContainer').innerHTML = 
                 '<div class="p-4 bg-gray-950 border border-red-800 rounded-xl space-y-3 text-left">' +
                     '<h3 class="text-sm font-black text-red-500 uppercase text-center">🏁 ' + winTitle + '</h3>' +
                     '<p class="text-[11px] text-gray-300 text-center font-semibold">' + data.message + '</p>' +
                     '<div class="pt-2 border-t border-gray-800">' +
-                        '<span class="text-[10px] font-bold text-gray-400 uppercase block mb-1 text-center">All Player Roles:</span>' +
+                        '<span class="text-[10px] font-bold text-gray-400 uppercase block mb-1 text-center">جميع أدوار اللاعبين:</span>' +
                         '<div class="max-h-40 overflow-y-auto pr-1 space-y-1">' + rolesListHTML + '</div>' +
                     '</div>' +
                 '</div>';

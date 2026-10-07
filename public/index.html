@@ -1,157 +1,114 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mafia Host Dashboard</title>
-    <script src="/socket.io/socket.io.js"></script>
+    <title>لعبة المافيا - لوحة المضيف</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
-<body class="bg-gray-950 text-gray-100 font-sans min-h-screen flex flex-col items-center justify-center p-4">
+<body class="bg-gray-950 text-gray-100 min-h-screen p-6 font-sans">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <header class="text-center bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
+            <h1 class="text-2xl font-black text-red-500">لعبة المافيا - لوحة المضيف</h1>
+            <p id="gameStateText" class="text-sm text-gray-400 mt-1">الحالة: في انتظار انضمام اللاعبين...</p>
+        </header>
 
-    <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-6">
-        
-        <div class="flex justify-between items-center border-b border-gray-800 pb-4">
-            <h1 class="text-xl font-black text-red-500 tracking-wider">MAFIA HOST DASHBOARD</h1>
-            <span id="game-status" class="px-3 py-1 bg-red-950 text-red-400 text-xs font-bold rounded-full uppercase">LOBBY</span>
-        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Config & Controls Panel -->
+            <div class="bg-gray-900 p-6 rounded-2xl border border-gray-800 space-y-4">
+                <h2 class="text-lg font-bold text-yellow-500">إعدادات اللعبة</h2>
+                <div id="configSection" class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">عدد المافيا:</label>
+                        <input type="number" id="mafiaCountInput" value="1" min="1" max="5" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-sm text-white">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="flex items-center space-x-2 space-x-reverse text-sm">
+                            <input type="checkbox" id="includeDoctor" checked class="rounded bg-gray-950 border-gray-800 text-red-600">
+                            <span>تفعيل الطبيب</span>
+                        </label>
+                        <label class="flex items-center space-x-2 space-x-reverse text-sm">
+                            <input type="checkbox" id="includeMayor" checked class="rounded bg-gray-950 border-gray-800 text-red-600">
+                            <span>تفعيل العمدة</span>
+                        </label>
+                        <label class="flex items-center space-x-2 space-x-reverse text-sm">
+                            <input type="checkbox" id="includeDetective" checked class="rounded bg-gray-950 border-gray-800 text-red-600">
+                            <span>تفعيل المحقق (برصاصة واحدة)</span>
+                        </label>
+                    </div>
+                    <button onclick="startGame()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-xl transition text-sm">بدء اللعبة</button>
+                </div>
 
-        <div>
-            <h2 class="text-xs font-bold text-gray-400 uppercase mb-2">Connected Players (<span id="player-count">0</span>)</h2>
-            <div id="players-list" class="space-y-2 max-h-40 overflow-y-auto pr-1"></div>
-        </div>
+                <div id="controlSection" class="space-y-2 pt-4 border-t border-gray-800 hidden">
+                    <button onclick="socket.emit('start_discussion')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-xl text-sm">بدء مرحلة النقاش</button>
+                    <button onclick="socket.emit('next_speaker')" class="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded-xl text-sm">المتحدث التالي</button>
+                    <button onclick="socket.emit('start_voting')" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-xl text-sm">بدء التصويت الجماعي</button>
+                </div>
 
-        <div id="config-section" class="space-y-4 pt-4 border-t border-gray-800">
-            <h2 class="text-xs font-bold text-red-400 uppercase">Game Rules Setup</h2>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">Number of Mafia:</label>
-                <input type="number" id="mafia-count" min="1" value="1" class="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-red-500">
+                <button onclick="socket.emit('reset_to_lobby')" class="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold py-2 rounded-xl text-xs mt-4">إعادة ضبط اللعبة (للإستراحة)</button>
             </div>
-            <div class="flex items-center space-x-2 space-x-reverse">
-                <input type="checkbox" id="include-doctor" checked class="w-4 h-4 accent-red-500 rounded bg-gray-950 border-gray-800">
-                <label for="include-doctor" class="text-sm text-gray-300">Include Doctor 🩺</label>
+
+            <!-- Connected Players Panel -->
+            <div class="bg-gray-900 p-6 rounded-2xl border border-gray-800 space-y-4">
+                <h2 class="text-lg font-bold text-yellow-500">اللاعبون المتصلون (<span id="playerCount">0</span>)</h2>
+                <div id="playersList" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    <!-- Populated dynamically -->
+                </div>
+                <div class="pt-4 border-t border-gray-800">
+                    <h3 class="text-xs font-bold text-gray-400 mb-2">نتيجة المرحلة الحية:</h3>
+                    <div id="liveResult" class="p-3 bg-gray-950 border border-gray-800 rounded-xl text-xs text-gray-300 min-h-[60px]">
+                        في انتظار الأحداث...
+                    </div>
+                </div>
             </div>
-            <button id="start-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 font-bold rounded-xl text-sm transition shadow-lg shadow-red-900/30">
-                Start Game & Assign Roles
-            </button>
         </div>
-
-        <div id="day-controls" class="hidden space-y-3 pt-4 border-t border-gray-800">
-            <h2 class="text-xs font-bold text-yellow-400 uppercase">Day Phase Controls</h2>
-            <button id="start-discussion-btn" class="w-full py-2 bg-blue-600 hover:bg-blue-700 font-bold rounded-xl text-xs transition">
-                Start Discussion (Pass the Mic) 🎤
-            </button>
-            <div id="speaker-host-info" class="text-xs text-gray-300 bg-gray-950 p-2 rounded-lg text-center hidden"></div>
-            <button id="next-speaker-btn" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-xl text-xs transition hidden">
-                Next Speaker ⏭️
-            </button>
-            <button id="start-voting-btn" class="w-full py-2 bg-purple-600 hover:bg-purple-700 font-bold rounded-xl text-xs transition">
-                Start Daytime Voting ⚖️
-            </button>
-        </div>
-
-        <!-- Reset to Lobby Control -->
-        <div id="reset-container" class="hidden pt-4 border-t border-gray-800">
-            <button id="reset-btn" class="w-full py-3 bg-gray-800 hover:bg-gray-700 font-bold rounded-xl text-xs text-yellow-400 transition">
-                Return to Lobby (New Game) 🔄
-            </button>
-        </div>
-
-        <div id="result-container" class="hidden pt-4 border-t border-gray-800 text-center">
-            <span class="text-xs font-bold text-gray-400 uppercase">Live Phase Result</span>
-            <div id="result-message" class="mt-2 text-sm text-yellow-400 font-semibold bg-gray-950 p-3 rounded-xl border border-gray-800"></div>
-        </div>
-
     </div>
 
     <script>
         const socket = io();
 
-        const gameStatus = document.getElementById('game-status');
-        const playerCount = document.getElementById('player-count');
-        const playersList = document.getElementById('players-list');
-        const configSection = document.getElementById('config-section');
-        const startBtn = document.getElementById('start-btn');
-        const dayControls = document.getElementById('day-controls');
-        const speakerHostInfo = document.getElementById('speaker-host-info');
-        const nextSpeakerBtn = document.getElementById('next-speaker-btn');
-        const resultContainer = document.getElementById('result-container');
-        const resultMessage = document.getElementById('result-message');
-        const resetContainer = document.getElementById('reset-container');
-        const resetBtn = document.getElementById('reset-btn');
+        function startGame() {
+            let mafiaCount = document.getElementById('mafiaCountInput').value;
+            let includeDoctor = document.getElementById('includeDoctor').checked;
+            let includeMayor = document.getElementById('includeMayor').checked;
+            let includeDetective = document.getElementById('includeDetective').checked;
+            socket.emit('start_game_config', { mafiaCount, includeDoctor, includeMayor, includeDetective });
+        }
 
         socket.on('state_update', (data) => {
-            gameStatus.textContent = data.gameState;
-            playerCount.textContent = data.players.length;
-
+            document.getElementById('gameStateText').innerText = 'حالة اللعبة: ' + data.gameState;
+            document.getElementById('playerCount').innerText = data.players.length;
+            
+            let configSec = document.getElementById('configSection');
+            let controlSec = document.getElementById('controlSection');
             if (data.gameState === 'LOBBY') {
-                startBtn.disabled = false;
-                startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                configSection.classList.remove('hidden');
-                resetContainer.classList.add('hidden');
-                resultContainer.classList.add('hidden');
+                configSec.classList.remove('hidden');
+                controlSec.classList.add('hidden');
             } else {
-                startBtn.disabled = true;
-                startBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                configSection.classList.add('hidden');
+                configSec.classList.add('hidden');
+                controlSec.classList.remove('hidden');
             }
 
-            playersList.innerHTML = '';
+            let listHtml = '';
             data.players.forEach(p => {
-                const div = document.createElement('div');
-                div.className = 'flex justify-between items-center bg-gray-950 px-3 py-2 rounded-xl border border-gray-800 text-xs';
-                div.innerHTML = `<span class="${p.isAlive ? '' : 'line-through text-gray-500'}">${p.name}</span> <span class="text-gray-500">${p.isAlive ? 'In Game' : 'Dead'}</span>`;
-                playersList.appendChild(div);
+                let statusBadge = p.isAlive ? '<span class="text-green-400 text-xs">في اللعبة</span>' : '<span class="text-red-500 text-xs">ميت</span>';
+                if (!p.isConnected) statusBadge += ' <span class="text-yellow-500 text-xs">(منفصل)</span>';
+                if (p.mayorRevealed) statusBadge += ' <span class="text-yellow-400 text-xs">(عمدة مكشوف)</span>';
+                listHtml += `<div class="flex justify-between items-center p-2 bg-gray-950 rounded border border-gray-800 text-sm"><span>${p.name}</span> ${statusBadge}</div>`;
             });
-
-            if (data.gameState === 'NIGHT_RESULTS' || data.gameState === 'DAY_DISCUSSION') {
-                dayControls.classList.remove('hidden');
-                if (data.gameState === 'DAY_DISCUSSION') {
-                    nextSpeakerBtn.classList.remove('hidden');
-                    speakerHostInfo.classList.remove('hidden');
-                }
-            } else {
-                dayControls.classList.add('hidden');
-            }
+            document.getElementById('playersList').innerHTML = listHtml;
         });
-
-        socket.on('speaker_update', (data) => {
-            if (data.currentSpeaker) {
-                speakerHostInfo.textContent = `Current Speaker: ${data.currentSpeaker.name} (${data.speakerIndex + 1} of ${data.totalLiving})`;
-            } else {
-                speakerHostInfo.textContent = 'Discussion finished. Ready for voting!';
-                nextSpeakerBtn.classList.add('hidden');
-            }
-        });
-
-        startBtn.onclick = () => {
-            const mafiaCount = document.getElementById('mafia-count').value;
-            const includeDoctor = document.getElementById('include-doctor').checked;
-            socket.emit('start_game_config', { mafiaCount, includeDoctor });
-        };
-
-        document.getElementById('start-discussion-btn').onclick = () => socket.emit('start_discussion');
-        nextSpeakerBtn.onclick = () => socket.emit('next_speaker');
-        document.getElementById('start-voting-btn').onclick = () => socket.emit('start_voting');
-        resetBtn.onclick = () => socket.emit('reset_to_lobby');
 
         socket.on('night_summary', (data) => {
-            resultContainer.classList.remove('hidden');
-            resultMessage.textContent = data.message;
+            document.getElementById('liveResult').innerText = data.message;
         });
 
         socket.on('voting_summary', (data) => {
-            resultContainer.classList.remove('hidden');
-            resultMessage.textContent = data.message;
+            document.getElementById('liveResult').innerText = data.message;
         });
 
-        socket.on('game_over', (data) => {
-            gameStatus.textContent = 'GAME OVER';
-            resultContainer.classList.remove('hidden');
-            resultMessage.className = 'mt-2 text-base text-red-400 font-black bg-gray-950 p-4 rounded-xl border border-red-800';
-            resultMessage.textContent = data.message;
-            dayControls.classList.add('hidden');
-            resetContainer.classList.remove('hidden');
+        socket.on('announcement', (msg) => {
+            document.getElementById('liveResult').innerText = msg;
         });
     </script>
 </body>

@@ -12,12 +12,14 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 let players = []; // { id, name, role, isAlive }
-let gameState = 'LOBBY'; // LOBBY, NIGHT_MAFIA, NIGHT_DOCTOR, NIGHT_RESULTS, DAY_DISCUSSION, DAY_VOTING, DAY_RESULTS
+let gameState = 'LOBBY'; 
 let nightActions = {
     mafiaKills: [],
     doctorHeal: null
 };
-let votes = {};
+let votes = {}; // socketId -> targetId
+let lockedVotes = {}; // socketId -> boolean
+let currentSpeakerIndex = 0;
 
 io.on('connection', (socket) => {
     console.log(`Connected: ${socket.id}`);
@@ -25,6 +27,11 @@ io.on('connection', (socket) => {
     socket.emit('state_update', { gameState, players: getSafePlayers() });
 
     socket.on('join_game', (nickname) => {
+        if (gameState !== 'LOBBY') return;
+        
+        // Remove existing player entry for this socket if any exists
+        players = players.filter(p => p.id !== socket.id);
+
         let cleanName = nickname.trim() || `Player ${players.length + 1}`;
         players.push({
             id: socket.id,
@@ -32,6 +39,9 @@ io.on('connection', (socket) => {
             role: null,
             isAlive: true
         });
+        
+        // Explicitly emit join_success to hide the player join form
+        socket.emit('join_success');
         broadcastUpdate();
     });
 
@@ -43,7 +53,21 @@ io.on('connection', (socket) => {
         nightActions = { mafiaKills: [], doctorHeal: null };
         
         broadcastUpdate();
-        triggerNightPhase();
+        triggerNightMafia();
+    });
+
+    socket.on('reset_to_lobby', () => {
+        gameState = 'LOBBY';
+        players.forEach(p => {
+            p.role = null;
+            p.isAlive = true;
+        });
+        nightActions = { mafiaKills: [], doctorHeal: null };
+        votes = {};
+        lockedVotes = {};
+        currentSpeakerIndex = 0;
+        broadcastUpdate();
+        io.emit('reset_client');
     });
 
     socket.on('mafia_action', (data) => {
@@ -63,43 +87,67 @@ io.on('connection', (socket) => {
         });
 
         if (nightActions.mafiaKills.length >= mafiaSockets.length) {
-            gameState = 'NIGHT_DOCTOR';
-            broadcastUpdate();
-            triggerNightPhase();
+            let doctorAlive = players.some(p => p.role === 'Doctor' && p.isAlive);
+            if (doctorAlive) {
+                gameState = 'NIGHT_DOCTOR';
+                broadcastUpdate();
+                triggerNightDoctor();
+            } else {
+                resolveNight();
+            }
         }
     });
 
     socket.on('doctor_action', (targetId) => {
         let player = players.find(p => p.id === socket.id);
-        if (!player || player.role !== 'Doctor' || !player.isAlive) {
-            resolveNight();
-            return;
-        }
+        if (!player || player.role !== 'Doctor' || !player.isAlive) return;
         nightActions.doctorHeal = targetId;
         resolveNight();
     });
 
     socket.on('start_discussion', () => {
         gameState = 'DAY_DISCUSSION';
+        let living = players.filter(p => p.isAlive);
+        currentSpeakerIndex = 0;
         broadcastUpdate();
-        io.emit('phase_announcement', { title: 'مرحلة النقاش اليومي', desc: 'كل لاعب يأخذ دوره للتحدث (تمرير المايك)...' });
+        broadcastSpeaker();
+    });
+
+    socket.on('next_speaker', () => {
+        let living = players.filter(p => p.isAlive);
+        currentSpeakerIndex++;
+        if (currentSpeakerIndex >= living.length) {
+            currentSpeakerIndex = living.length - 1;
+        }
+        broadcastSpeaker();
     });
 
     socket.on('start_voting', () => {
         gameState = 'DAY_VOTING';
         votes = {};
+        lockedVotes = {};
         broadcastUpdate();
-        io.emit('trigger_vote_prompts', { players: players.filter(p => p.isAlive) });
+        broadcastVotingState();
     });
 
     socket.on('cast_vote', (targetId) => {
         let voter = players.find(p => p.id === socket.id);
-        if (!voter || !voter.isAlive) return;
+        if (!voter || !voter.isAlive || lockedVotes[socket.id]) return;
 
         votes[socket.id] = targetId;
+        broadcastVotingState();
+    });
 
-        let livingPlayers = players.filter(p => p.isAlive);
-        if (Object.keys(votes).length >= livingPlayers.length) {
+    socket.on('lock_vote', () => {
+        let voter = players.find(p => p.id === socket.id);
+        if (!voter || !voter.isAlive || !votes[socket.id]) return;
+
+        lockedVotes[socket.id] = true;
+        broadcastVotingState();
+
+        let living = players.filter(p => p.isAlive);
+        let allLocked = living.every(p => lockedVotes[p.id]);
+        if (allLocked) {
             resolveVoting();
         }
     });
@@ -143,12 +191,39 @@ function assignRoles(config) {
     });
 }
 
-function triggerNightPhase() {
-    io.emit('trigger_night_prompts', { gameState, players: players.filter(p => p.isAlive) });
+function triggerNightMafia() {
+    io.emit('trigger_night_mafia', { players: players.filter(p => p.isAlive) });
+}
+
+function triggerNightDoctor() {
+    io.emit('trigger_night_doctor', { players: players.filter(p => p.isAlive) });
+}
+
+function checkWinConditions() {
+    let livingMafia = players.filter(p => p.role === 'Mafia' && p.isAlive).length;
+    let livingNonMafia = players.filter(p => p.role !== 'Mafia' && p.isAlive).length;
+
+    if (livingMafia === 0) {
+        triggerGameOver('Citizens', 'انتصر المواطنون! تم القضاء على جميع أفراد المافيا.');
+        return true;
+    } else if (livingMafia >= livingNonMafia) {
+        triggerGameOver('Mafia', 'انتصرت المافيا! عدد أفراد المافيا أصبح مساوياً أو أكبر من المواطنين.');
+        return true;
+    }
+    return false;
+}
+
+function triggerGameOver(winner, message) {
+    gameState = 'GAME_OVER';
+    let roleBreakdown = players.map(p => ({
+        name: p.name,
+        role: p.role,
+        isAlive: p.isAlive
+    }));
+    io.emit('game_over', { winner, message, roleBreakdown });
 }
 
 function resolveNight() {
-    gameState = 'NIGHT_RESULTS';
     let killedTargetId = nightActions.mafiaKills.length > 0 ? nightActions.mafiaKills[0].targetId : null;
     let healedTargetId = nightActions.doctorHeal;
 
@@ -164,16 +239,50 @@ function resolveNight() {
         resultMessage = `لم يحدث شيء في هذه الليلة.`;
     }
 
+    if (checkWinConditions()) {
+        io.emit('night_summary', { message: resultMessage });
+        broadcastUpdate();
+        return;
+    }
+
+    gameState = 'NIGHT_RESULTS';
     io.emit('night_summary', { message: resultMessage });
     broadcastUpdate();
 }
 
+function broadcastSpeaker() {
+    let living = players.filter(p => p.isAlive);
+    let currentSpeaker = living[currentSpeakerIndex] || null;
+    io.emit('speaker_update', { 
+        currentSpeaker, 
+        speakerIndex: currentSpeakerIndex, 
+        totalLiving: living.length 
+    });
+}
+
+function broadcastVotingState() {
+    let living = players.filter(p => p.isAlive);
+    let voteBoardData = living.map(p => {
+        let votersForMe = players.filter(voter => voter.isAlive && votes[voter.id] === p.id).map(voter => ({
+            name: voter.name,
+            locked: !!lockedVotes[voter.id]
+        }));
+        return {
+            id: p.id,
+            name: p.name,
+            voters: votersForMe
+        };
+    });
+    io.emit('voting_state_update', { voteBoardData, votes, lockedVotes });
+}
+
 function resolveVoting() {
-    gameState = 'DAY_RESULTS';
-    
     let voteCounts = {};
-    Object.values(votes).forEach(targetId => {
-        voteCounts[targetId] = (voteCounts[targetId] || 0) + 1;
+    Object.entries(votes).forEach(([voterId, targetId]) => {
+        let voter = players.find(p => p.id === voterId);
+        if (voter && voter.isAlive) {
+            voteCounts[targetId] = (voteCounts[targetId] || 0) + 1;
+        }
     });
 
     let highestVotes = 0;
@@ -194,15 +303,25 @@ function resolveVoting() {
         message = `لم يتم إعدام أي شخص (تعادل في الأصوات).`;
     }
 
+    if (checkWinConditions()) {
+        gameState = 'DAY_RESULTS';
+        io.emit('voting_summary', { message });
+        broadcastUpdate();
+        return;
+    }
+
+    gameState = 'DAY_RESULTS';
     io.emit('voting_summary', { message });
     broadcastUpdate();
 
     setTimeout(() => {
+        if (gameState === 'GAME_OVER') return;
         gameState = 'NIGHT_MAFIA';
         nightActions = { mafiaKills: [], doctorHeal: null };
         votes = {};
+        lockedVotes = {};
         broadcastUpdate();
-        triggerNightPhase();
+        triggerNightMafia();
     }, 6000);
 }
 

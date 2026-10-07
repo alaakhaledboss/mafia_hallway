@@ -1,39 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mafia Player</title>
-    <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
-<body class="bg-gray-950 text-gray-100 font-sans min-h-screen flex flex-col items-center justify-center p-4">
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col items-center justify-center p-4">
 
-    <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl text-center space-y-6">
-        
+    <!-- JOIN SCREEN -->
+    <div id="join-screen" class="w-full max-w-sm bg-gray-950 border border-gray-800 p-6 rounded-2xl shadow-2xl text-center space-y-4">
         <h1 class="text-xl font-black text-red-500 tracking-wider">MAFIA PLAYER</h1>
+        <p class="text-xs text-gray-400">Enter your nickname to join the game session</p>
+        
+        <input type="text" id="nickname" placeholder="Your Name" 
+            class="w-full bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-sm text-center text-white focus:outline-none focus:border-red-600 transition">
+        
+        <button id="join-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm transition shadow-lg shadow-red-900/40">
+            Join Game
+        </button>
+    </div>
 
-        <!-- Join Screen -->
-        <div id="join-screen" class="space-y-4">
-            <p class="text-xs text-gray-400">Enter your nickname to join the game session</p>
-            <input type="text" id="nickname" placeholder="Your Name" class="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-center text-gray-200 focus:outline-none focus:border-red-500">
-            <button id="join-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 font-bold rounded-xl text-sm transition shadow-lg shadow-red-900/30">
-                Join Game
-            </button>
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="hidden w-full max-w-sm bg-gray-950 border border-gray-800 p-6 rounded-2xl shadow-2xl text-center space-y-4">
+        <div>
+            <span class="text-[10px] uppercase font-bold tracking-widest text-gray-500">Your Role</span>
+            <div id="my-role" class="text-xl font-black mt-1 text-gray-200">Waiting...</div>
         </div>
 
-        <!-- Role & Action Screen -->
-        <div id="game-screen" class="hidden space-y-4">
-            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4">
-                <span class="text-xs font-bold text-gray-400 uppercase">Your Secret Role</span>
-                <div id="my-role" class="text-xl font-black mt-1">Waiting...</div>
-            </div>
-
-            <div id="action-container" class="space-y-2">
-                <!-- Dynamic action prompts show here -->
-            </div>
+        <div id="action-container" class="border-t border-gray-800 pt-4">
+            <p class="text-xs text-gray-500 italic">Waiting for host to start the game...</p>
         </div>
-
     </div>
 
     <script>
@@ -47,91 +45,205 @@
         const actionContainer = document.getElementById('action-container');
 
         let assignedRole = null;
+        let mySocketId = null;
+        let isAlive = true;
+
+        socket.on('connect', () => {
+            mySocketId = socket.id;
+        });
 
         joinBtn.onclick = () => {
             const name = nicknameInput.value.trim();
             if (!name) return;
+            
+            joinBtn.disabled = true;
+            joinBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
             socket.emit('join_game', name);
+
             joinScreen.classList.add('hidden');
             gameScreen.classList.remove('hidden');
+            myRole.textContent = 'Waiting for host to start...';
         };
+
+        socket.on('state_update', (data) => {
+            if (data.gameState === 'LOBBY') return;
+
+            let me = data.players.find(function(p) { return p.id === mySocketId; });
+            if (me) {
+                isAlive = me.isAlive;
+                if (!isAlive) {
+                    myRole.classList.add('line-through', 'text-gray-600');
+                }
+            }
+        });
+
+        socket.on('reset_client', () => {
+            joinBtn.disabled = false;
+            joinBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            joinScreen.classList.remove('hidden');
+            gameScreen.classList.add('hidden');
+            nicknameInput.value = '';
+            myRole.textContent = 'Waiting...';
+            myRole.className = 'text-xl font-black mt-1 text-gray-200';
+            actionContainer.innerHTML = '';
+        });
 
         socket.on('your_role', (data) => {
             assignedRole = data.role;
             myRole.textContent = assignedRole;
-            if (assignedRole === 'Mafia') myRole.className = 'text-xl font-black mt-1 text-red-500';
-            else if (assignedRole === 'Doctor') myRole.className = 'text-xl font-black mt-1 text-green-400';
-            else myRole.className = 'text-xl font-black mt-1 text-blue-400';
-        });
-
-        socket.on('trigger_night_prompts', (data) => {
-            actionContainer.innerHTML = '';
-            
             if (assignedRole === 'Mafia') {
-                const title = document.createElement('div');
-                title.className = 'text-xs font-bold text-red-400 mb-2';
-                title.textContent = 'NIGHT PHASE: CHOOSE TARGET TO ELIMINATE';
-                actionContainer.appendChild(title);
-
-                data.players.forEach(p => {
-                    // Prevent targeting yourself or other mafia members
-                    if (p.id === socket.id) return; 
-
-                    const btn = document.createElement('button');
-                    btn.className = 'w-full py-2 bg-gray-800 hover:bg-red-900 rounded-lg text-xs mb-2 transition';
-                    btn.textContent = `Eliminate ${p.name}`;
-                    btn.onclick = () => {
-                        socket.emit('mafia_action', { targetId: p.id });
-                        actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Target submitted! Waiting for others...</p>';
-                    };
-                    actionContainer.appendChild(btn);
-                });
+                myRole.className = 'text-xl font-black mt-1 text-red-500';
             } else if (assignedRole === 'Doctor') {
-                const title = document.createElement('div');
-                title.className = 'text-xs font-bold text-green-400 mb-2';
-                title.textContent = 'NIGHT PHASE: CHOOSE SOMEONE TO HEAL';
-                actionContainer.appendChild(title);
-
-                data.players.forEach(p => {
-                    const btn = document.createElement('button');
-                    btn.className = 'w-full py-2 bg-gray-800 hover:bg-green-900 rounded-lg text-xs mb-2 transition';
-                    btn.textContent = `Heal ${p.name}`;
-                    btn.onclick = () => {
-                        socket.emit('doctor_action', p.id);
-                        actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Heal submitted! Waiting for night results...</p>';
-                    };
-                    actionContainer.appendChild(btn);
-                });
+                myRole.className = 'text-xl font-black mt-1 text-green-400';
             } else {
-                actionContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Night phase in progress. Close your eyes!</p>';
+                myRole.className = 'text-xl font-black mt-1 text-blue-400';
             }
         });
 
-        socket.on('night_summary', () => {
-            actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Night concluded. Check the laptop host screen for results!</p>';
-        });
+        socket.on('trigger_night_mafia', (data) => {
+            if (!isAlive) {
+                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><p class="text-xs text-red-400 font-bold">لقد مت 💀</p><p class="text-[10px] text-gray-500 mt-1">أنت ميت ولا يمكنك المشاركة أو التصويت.</p></div>';
+                return;
+            }
+            if (assignedRole !== 'Mafia') {
+                actionContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Night phase in progress. Mafia are choosing...</p>';
+                return;
+            }
 
-        socket.on('phase_announcement', (data) => {
-            actionContainer.innerHTML = `<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><h3 class="text-xs font-bold text-yellow-400">${data.title}</h3><p class="text-xs text-gray-300 mt-1">${data.desc}</p></div>`;
-        });
+            actionContainer.innerHTML = '<div class="text-xs font-bold text-red-400 mb-2">NIGHT: CHOOSE TARGET TO ELIMINATE</div>';
+            data.players.forEach(function(p) {
+                if (p.id === socket.id) return;
 
-        socket.on('trigger_vote_prompts', (data) => {
-            actionContainer.innerHTML = '<div class="text-xs font-bold text-purple-400 mb-2">DAYTIME VOTING: CHOOSE WHO TO EXECUTE</div>';
-            
-            data.players.forEach(p => {
                 const btn = document.createElement('button');
-                btn.className = 'w-full py-2 bg-gray-800 hover:bg-purple-900 rounded-lg text-xs mb-2 transition';
-                btn.textContent = `Vote to Execute ${p.name}`;
-                btn.onclick = () => {
-                    socket.emit('cast_vote', p.id);
-                    actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Vote cast! Waiting for others...</p>';
+                btn.className = 'w-full py-2 bg-gray-800 hover:bg-red-900 rounded-lg text-xs mb-2 transition text-white';
+                btn.textContent = 'Eliminate ' + p.name;
+                btn.onclick = function() {
+                    socket.emit('mafia_action', { targetId: p.id });
+                    actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Target submitted! Waiting for other Mafia...</p>';
                 };
                 actionContainer.appendChild(btn);
             });
         });
 
+        socket.on('trigger_night_doctor', (data) => {
+            if (!isAlive) return;
+            if (assignedRole !== 'Doctor') {
+                actionContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Doctor is making a save...</p>';
+                return;
+            }
+
+            actionContainer.innerHTML = '<div class="text-xs font-bold text-green-400 mb-2">NIGHT: CHOOSE SOMEONE TO HEAL</div>';
+            data.players.forEach(function(p) {
+                const btn = document.createElement('button');
+                btn.className = 'w-full py-2 bg-gray-800 hover:bg-green-900 rounded-lg text-xs mb-2 transition text-white';
+                btn.textContent = 'Heal ' + p.name;
+                btn.onclick = function() {
+                    socket.emit('doctor_action', p.id);
+                    actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Heal submitted! Wrapping up night...</p>';
+                };
+                actionContainer.appendChild(btn);
+            });
+        });
+
+        socket.on('speaker_update', (data) => {
+            if (!isAlive) {
+                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><p class="text-xs text-red-400 font-bold">أنت ميت 💀</p><p class="text-[10px] text-gray-500 mt-1">الموتى لا يتحدثون ولا يصوتون.</p></div>';
+                return;
+            }
+
+            if (!data.currentSpeaker) {
+                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><h3 class="text-xs font-bold text-yellow-400">Discussion Finished</h3><p class="text-xs text-gray-300 mt-1">Waiting for host to start voting...</p></div>';
+                return;
+            }
+
+            let isMe = data.currentSpeaker.id === mySocketId;
+            let speakerText = isMe ? '🎤 الدور عليك لتتحدث الآن!' : '🎤 المتحدث الحالي: ' + data.currentSpeaker.name;
+            let textClass = isMe ? 'text-green-400 text-base animate-pulse' : 'text-gray-200';
+
+            actionContainer.innerHTML = 
+                '<div class="p-4 bg-gray-950 rounded-xl border border-gray-800 space-y-2">' +
+                    '<h3 class="text-xs font-bold text-yellow-400 uppercase">مرحلة النقاش (تمرير المايك)</h3>' +
+                    '<p class="text-sm font-bold ' + textClass + '">' + speakerText + '</p>' +
+                    '<span class="text-[10px] text-gray-500 block">Speaker ' + (data.speakerIndex + 1) + ' of ' + data.totalLiving + '</span>' +
+                '</div>';
+        });
+
+        socket.on('voting_state_update', (data) => {
+            if (!isAlive) {
+                actionContainer.innerHTML = '<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><p class="text-xs text-red-400 font-bold">أنت ميت 💀</p><p class="text-[10px] text-gray-500 mt-1">لا يمكنك التصويت وأنت ميت.</p></div>';
+                return;
+            }
+
+            let myVoteTarget = data.votes[mySocketId];
+            let isLocked = data.lockedVotes[mySocketId];
+
+            let html = '<div class="space-y-3">' +
+                '<div class="text-xs font-bold text-purple-400 uppercase">Daytime Voting Board ⚖️</div>' +
+                '<p class="text-[10px] text-gray-400">Select who to vote for. You can change your mind until you lock in!</p>' +
+                '<div class="space-y-2 max-h-56 overflow-y-auto pr-1 text-left">';
+
+            data.voteBoardData.forEach(function(p) {
+                let isSelected = myVoteTarget === p.id;
+                let fingersHTML = p.voters.map(function(v) {
+                    return '<span title="' + v.name + '" class="inline-block px-1.5 py-0.5 bg-purple-950 text-purple-300 rounded text-[10px] mr-1 ' + (v.locked ? 'border border-purple-500' : 'opacity-70') + '">👉 ' + v.name + '</span>';
+                }).join('');
+
+                html += '<div class="bg-gray-950 p-2 rounded-xl border ' + (isSelected ? 'border-purple-500' : 'border-gray-800') + ' flex flex-col space-y-1">' +
+                    '<div class="flex justify-between items-center">' +
+                        '<span class="text-xs font-bold text-gray-200">' + p.name + '</span>' +
+                        (!isLocked ? '<button onclick="voteFor(\'' + p.id + '\')" class="px-2 py-1 bg-gray-800 hover:bg-purple-900 rounded text-[10px] text-gray-200 transition">Vote</button>' : '') +
+                    '</div>' +
+                    '<div class="flex flex-wrap gap-1">' + (fingersHTML || '<span class="text-[10px] text-gray-600">No votes yet</span>') + '</div>' +
+                '</div>';
+            });
+
+            html += '</div>';
+
+            if (myVoteTarget && !isLocked) {
+                html += '<button onclick="lockVote()" class="w-full py-2 bg-purple-600 hover:bg-purple-700 font-bold rounded-xl text-xs transition shadow-lg shadow-purple-900/30 text-white">Lock In Vote 🔒</button>';
+            } else if (isLocked) {
+                html += '<div class="p-2 bg-green-950 border border-green-800 rounded-xl text-xs text-green-400 font-bold">Vote Locked In! 🔒 Waiting for others...</div>';
+            }
+
+            html += '</div>';
+            actionContainer.innerHTML = html;
+        });
+
+        window.voteFor = function(targetId) {
+            socket.emit('cast_vote', targetId);
+        };
+
+        window.lockVote = function() {
+            socket.emit('lock_vote');
+        };
+
+        socket.on('night_summary', () => {
+            if (!isAlive) return;
+            actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Night concluded. Check the laptop host screen for results!</p>';
+        });
+
         socket.on('voting_summary', () => {
+            if (!isAlive) return;
             actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Voting concluded. Check the laptop host screen!</p>';
+        });
+
+        socket.on('game_over', (data) => {
+            let rolesListHTML = data.roleBreakdown.map(function(p) {
+                let roleColor = p.role === 'Mafia' ? 'text-red-400' : (p.role === 'Doctor' ? 'text-green-400' : 'text-blue-400');
+                return '<div class="flex justify-between text-xs py-1 border-b border-gray-800"><span class="font-semibold text-gray-300">' + p.name + '</span> <span class="' + roleColor + ' font-bold">' + p.role + '</span></div>';
+            }).join('');
+
+            let winTitle = data.winner === 'Mafia' ? 'Mafia Won !!' : 'Citizens Won !!';
+            actionContainer.innerHTML = 
+                '<div class="p-4 bg-gray-950 border border-red-800 rounded-xl space-y-3 text-left">' +
+                    '<h3 class="text-sm font-black text-red-500 uppercase text-center">🏁 ' + winTitle + '</h3>' +
+                    '<p class="text-[11px] text-gray-300 text-center font-semibold">' + data.message + '</p>' +
+                    '<div class="pt-2 border-t border-gray-800">' +
+                        '<span class="text-[10px] font-bold text-gray-400 uppercase block mb-1 text-center">All Player Roles:</span>' +
+                        '<div class="max-h-40 overflow-y-auto pr-1 space-y-1">' + rolesListHTML + '</div>' +
+                    '</div>' +
+                '</div>';
         });
     </script>
 </body>

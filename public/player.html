@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mafia Player</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl text-center space-y-6">
+        
+        <h1 class="text-xl font-black text-red-500 tracking-wider">MAFIA PLAYER</h1>
+
+        <!-- Join Screen -->
+        <div id="join-screen" class="space-y-4">
+            <p class="text-xs text-gray-400">Enter your nickname to join the game session</p>
+            <input type="text" id="nickname" placeholder="Your Name" class="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-center text-gray-200 focus:outline-none focus:border-red-500">
+            <button id="join-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 font-bold rounded-xl text-sm transition shadow-lg shadow-red-900/30">
+                Join Game
+            </button>
+        </div>
+
+        <!-- Role & Action Screen -->
+        <div id="game-screen" class="hidden space-y-4">
+            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4">
+                <span class="text-xs font-bold text-gray-400 uppercase">Your Secret Role</span>
+                <div id="my-role" class="text-xl font-black mt-1">Waiting...</div>
+            </div>
+
+            <div id="action-container" class="space-y-2">
+                <!-- Dynamic action prompts show here -->
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const socket = io();
+
+        const joinScreen = document.getElementById('join-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const nicknameInput = document.getElementById('nickname');
+        const joinBtn = document.getElementById('join-btn');
+        const myRole = document.getElementById('my-role');
+        const actionContainer = document.getElementById('action-container');
+
+        let assignedRole = null;
+
+        joinBtn.onclick = () => {
+            const name = nicknameInput.value.trim();
+            if (!name) return;
+            socket.emit('join_game', name);
+            joinScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+        };
+
+        socket.on('your_role', (data) => {
+            assignedRole = data.role;
+            myRole.textContent = assignedRole;
+            if (assignedRole === 'Mafia') myRole.className = 'text-xl font-black mt-1 text-red-500';
+            else if (assignedRole === 'Doctor') myRole.className = 'text-xl font-black mt-1 text-green-400';
+            else myRole.className = 'text-xl font-black mt-1 text-blue-400';
+        });
+
+        socket.on('trigger_night_prompts', (data) => {
+            actionContainer.innerHTML = '';
+            
+            if (assignedRole === 'Mafia') {
+                const title = document.createElement('div');
+                title.className = 'text-xs font-bold text-red-400 mb-2';
+                title.textContent = 'NIGHT PHASE: CHOOSE TARGET TO ELIMINATE';
+                actionContainer.appendChild(title);
+
+                data.players.forEach(p => {
+                    // Prevent targeting yourself or other mafia members
+                    if (p.id === socket.id) return; 
+
+                    const btn = document.createElement('button');
+                    btn.className = 'w-full py-2 bg-gray-800 hover:bg-red-900 rounded-lg text-xs mb-2 transition';
+                    btn.textContent = `Eliminate ${p.name}`;
+                    btn.onclick = () => {
+                        socket.emit('mafia_action', { targetId: p.id });
+                        actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Target submitted! Waiting for others...</p>';
+                    };
+                    actionContainer.appendChild(btn);
+                });
+            } else if (assignedRole === 'Doctor') {
+                const title = document.createElement('div');
+                title.className = 'text-xs font-bold text-green-400 mb-2';
+                title.textContent = 'NIGHT PHASE: CHOOSE SOMEONE TO HEAL';
+                actionContainer.appendChild(title);
+
+                data.players.forEach(p => {
+                    const btn = document.createElement('button');
+                    btn.className = 'w-full py-2 bg-gray-800 hover:bg-green-900 rounded-lg text-xs mb-2 transition';
+                    btn.textContent = `Heal ${p.name}`;
+                    btn.onclick = () => {
+                        socket.emit('doctor_action', p.id);
+                        actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Heal submitted! Waiting for night results...</p>';
+                    };
+                    actionContainer.appendChild(btn);
+                });
+            } else {
+                actionContainer.innerHTML = '<p class="text-xs text-gray-500 italic">Night phase in progress. Close your eyes!</p>';
+            }
+        });
+
+        socket.on('night_summary', () => {
+            actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Night concluded. Check the laptop host screen for results!</p>';
+        });
+
+        socket.on('phase_announcement', (data) => {
+            actionContainer.innerHTML = `<div class="p-3 bg-gray-950 rounded-xl border border-gray-800"><h3 class="text-xs font-bold text-yellow-400">${data.title}</h3><p class="text-xs text-gray-300 mt-1">${data.desc}</p></div>`;
+        });
+
+        socket.on('trigger_vote_prompts', (data) => {
+            actionContainer.innerHTML = '<div class="text-xs font-bold text-purple-400 mb-2">DAYTIME VOTING: CHOOSE WHO TO EXECUTE</div>';
+            
+            data.players.forEach(p => {
+                const btn = document.createElement('button');
+                btn.className = 'w-full py-2 bg-gray-800 hover:bg-purple-900 rounded-lg text-xs mb-2 transition';
+                btn.textContent = `Vote to Execute ${p.name}`;
+                btn.onclick = () => {
+                    socket.emit('cast_vote', p.id);
+                    actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Vote cast! Waiting for others...</p>';
+                };
+                actionContainer.appendChild(btn);
+            });
+        });
+
+        socket.on('voting_summary', () => {
+            actionContainer.innerHTML = '<p class="text-xs text-yellow-400 font-bold">Voting concluded. Check the laptop host screen!</p>';
+        });
+    </script>
+</body>
+</html>

@@ -11,120 +11,121 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-let players = []; // { id, name, role, isAlive, socket }
-let hostId = null;
-let gameState = 'LOBBY'; // LOBBY, NIGHT_MAFIA, NIGHT_DOCTOR, NIGHT_RESULTS, DAY_VOTING, DEFENSE
-
+let players = []; // { id, name, role, isAlive }
+let gameState = 'LOBBY'; // LOBBY, NIGHT_MAFIA, NIGHT_DOCTOR, NIGHT_RESULTS, DAY_DISCUSSION, DAY_VOTING, DAY_RESULTS
 let nightActions = {
     mafiaKills: [],
-    doctorHeal: null,
-    detectiveCheck: null
+    doctorHeal: null
 };
-
-let votes = {}; // targetSocketId -> count
-let currentTrialPlayer = null;
+let votes = {};
 
 io.on('connection', (socket) => {
-    console.log(`Connection established: ${socket.id}`);
+    console.log(`Connected: ${socket.id}`);
 
-    // First connected user becomes host automatically if none exists
-    if (!hostId) {
-        hostId = socket.id;
-        socket.emit('set_host');
-    }
+    socket.emit('state_update', { gameState, players: getSafePlayers() });
 
     socket.on('join_game', (nickname) => {
         let cleanName = nickname.trim() || `Player ${players.length + 1}`;
         players.push({
             id: socket.id,
             name: cleanName,
-            role: 'Citizen',
+            role: null,
             isAlive: true
         });
-        broadcastLobbyState();
+        broadcastUpdate();
     });
 
-    // Host configures game and starts
     socket.on('start_game_config', (config) => {
-        if (socket.id !== hostId || players.length < 4) return;
+        if (players.length < 3) return;
         
         assignRoles(config);
         gameState = 'NIGHT_MAFIA';
-        nightActions = { mafiaKills: [], doctorHeal: null, detectiveCheck: null };
+        nightActions = { mafiaKills: [], doctorHeal: null };
         
-        io.emit('game_started', { state: gameState });
-        sendNightPrompts();
+        broadcastUpdate();
+        triggerNightPhase();
     });
 
-    // Mafia action submission
     socket.on('mafia_action', (data) => {
         let player = players.find(p => p.id === socket.id);
         if (!player || player.role !== 'Mafia' || !player.isAlive) return;
 
-        nightActions.mafiaKills.push({ mafiaName: player.name, targetId: data.targetId, action: data.action });
+        let target = players.find(p => p.id === data.targetId);
+        if (!target || target.id === socket.id || target.role === 'Mafia' || !target.isAlive) return;
+
+        if (nightActions.mafiaKills.some(k => k.mafiaId === socket.id)) return;
+
+        nightActions.mafiaKills.push({ mafiaId: socket.id, mafiaName: player.name, targetId: data.targetId });
         
-        // Broadcast action to fellow mafia so they coordinate live
         let mafiaSockets = players.filter(p => p.role === 'Mafia' && p.isAlive);
         mafiaSockets.forEach(m => {
             io.to(m.id).emit('mafia_live_log', nightActions.mafiaKills);
         });
 
-        // If all active mafia have acted, move to Doctor phase
         if (nightActions.mafiaKills.length >= mafiaSockets.length) {
             gameState = 'NIGHT_DOCTOR';
-            sendNightPrompts();
+            broadcastUpdate();
+            triggerNightPhase();
         }
     });
 
-    // Doctor action submission
     socket.on('doctor_action', (targetId) => {
         let player = players.find(p => p.id === socket.id);
         if (!player || player.role !== 'Doctor' || !player.isAlive) {
-            // If no doctor is alive/active, skip straight to results
             resolveNight();
             return;
         }
-
         nightActions.doctorHeal = targetId;
         resolveNight();
     });
 
-    // Voting submission
+    socket.on('start_discussion', () => {
+        gameState = 'DAY_DISCUSSION';
+        broadcastUpdate();
+        io.emit('phase_announcement', { title: 'مرحلة النقاش اليومي', desc: 'كل لاعب يأخذ دوره للتحدث (تمرير المايك)...' });
+    });
+
+    socket.on('start_voting', () => {
+        gameState = 'DAY_VOTING';
+        votes = {};
+        broadcastUpdate();
+        io.emit('trigger_vote_prompts', { players: players.filter(p => p.isAlive) });
+    });
+
     socket.on('cast_vote', (targetId) => {
         let voter = players.find(p => p.id === socket.id);
         if (!voter || !voter.isAlive) return;
 
         votes[socket.id] = targetId;
-        
-        // Check if all living players voted
+
         let livingPlayers = players.filter(p => p.isAlive);
         if (Object.keys(votes).length >= livingPlayers.length) {
-             tallyVotes();
+            resolveVoting();
         }
     });
 
     socket.on('disconnect', () => {
         players = players.filter(p => p.id !== socket.id);
-        if (socket.id === hostId && players.length > 0) {
-            hostId = players[0].id;
-            io.to(hostId).emit('set_host');
-        }
-        broadcastLobbyState();
+        broadcastUpdate();
     });
 });
 
-function broadcastLobbyState() {
-    io.emit('update_lobby', {
-        players: players.map(p => ({ id: p.id, name: p.name })),
-        state: gameState
-    });
+function getSafePlayers() {
+    return players.map(p => ({
+        id: p.id,
+        name: p.name,
+        isAlive: p.isAlive
+    }));
+}
+
+function broadcastUpdate() {
+    io.emit('state_update', { gameState, players: getSafePlayers() });
 }
 
 function assignRoles(config) {
     let shuffled = [...players].sort(() => 0.5 - Math.random());
     let mafiaCount = parseInt(config.mafiaCount) || 1;
     let includeDoctor = config.includeDoctor;
-    let includeDetective = config.includeDetective;
 
     shuffled.forEach((p, index) => {
         let playerRef = players.find(x => x.id === p.id);
@@ -132,8 +133,6 @@ function assignRoles(config) {
             playerRef.role = 'Mafia';
         } else if (includeDoctor && index === mafiaCount) {
             playerRef.role = 'Doctor';
-        } else if (includeDetective && index === mafiaCount + 1) {
-            playerRef.role = 'Detective';
         } else {
             playerRef.role = 'Citizen';
         }
@@ -144,8 +143,8 @@ function assignRoles(config) {
     });
 }
 
-function sendNightPrompts() {
-    io.emit('phase_change', { state: gameState, livingPlayers: players.filter(p => p.isAlive) });
+function triggerNightPhase() {
+    io.emit('trigger_night_prompts', { gameState, players: players.filter(p => p.isAlive) });
 }
 
 function resolveNight() {
@@ -159,57 +158,80 @@ function resolveNight() {
     if (killedTargetId && killedTargetId === healedTargetId) {
         resultMessage = `عملية قتل فاشلة , تمت محاولة قتل ${victim ? victim.name : 'الشخص'} وتمت معالجته`;
     } else if (killedTargetId) {
-        if (victim) {
-            victim.isAlive = false;
-        }
+        if (victim) victim.isAlive = false;
         resultMessage = `عملية قتل ناجحة !! تم تصفية ${victim ? victim.name : 'الضحية'}`;
     } else {
-        resultMessage = `لم يحدث شيء في هذه الليلة, الهدوء يعم المكان.`;
+        resultMessage = `لم يحدث شيء في هذه الليلة.`;
     }
 
-    io.emit('night_summary', { message: resultMessage, livingPlayers: players.filter(p => p.isAlive) });
+    io.emit('night_summary', { message: resultMessage });
+    broadcastUpdate();
 }
 
-function tallyVotes() {
-    let tally = {};
+function resolveVoting() {
+    gameState = 'DAY_RESULTS';
+    
+    let voteCounts = {};
     Object.values(votes).forEach(targetId => {
-        tally[targetId] = (tally[targetId] || 0) + 1;
+        voteCounts[targetId] = (voteCounts[targetId] || 0) + 1;
     });
 
-    let maxVotes = 0;
-    let suspectId = null;
-    for (let targetId in tally) {
-        if (tally[targetId] > maxVotes) {
-            maxVotes = tally[targetId];
-            suspectId = targetId;
+    let highestVotes = 0;
+    let executedId = null;
+    for (let [targetId, count] of Object.entries(voteCounts)) {
+        if (count > highestVotes) {
+            highestVotes = count;
+            executedId = targetId;
         }
     }
 
-    currentTrialPlayer = players.find(p => p.id === suspectId);
-    gameState = 'DEFENSE';
-    
-    io.emit('player_on_trial', {
-        suspect: currentTrialPlayer ? currentTrialPlayer.name : 'None',
-        votesCount: maxVotes
-    });
+    let victim = players.find(p => p.id === executedId);
+    let message = '';
+    if (victim) {
+        victim.isAlive = false;
+        message = `نتيجة التصويت: تم إعدام ${victim.name} بواسطة التصويت الجماعي!`;
+    } else {
+        message = `لم يتم إعدام أي شخص (تعادل في الأصوات).`;
+    }
+
+    io.emit('voting_summary', { message });
+    broadcastUpdate();
+
+    setTimeout(() => {
+        gameState = 'NIGHT_MAFIA';
+        nightActions = { mafiaKills: [], doctorHeal: null };
+        votes = {};
+        broadcastUpdate();
+        triggerNightPhase();
+    }, 6000);
 }
 
 function getLocalIP() {
     const interfaces = os.networkInterfaces();
+    let fallbackIP = 'localhost';
+
     for (const name of Object.keys(interfaces)) {
         for (const net of interfaces[name]) {
-            if (net.family === 'IPv4' && !net.internal) return net.address;
+            if (net.family === 'IPv4' && !net.internal) {
+                if (net.address.startsWith('192.168.56.') || net.address.startsWith('26.')) {
+                    continue;
+                }
+                if (net.address.startsWith('192.168.') || net.address.startsWith('10.') || net.address.startsWith('172.')) {
+                    return net.address;
+                }
+                fallbackIP = net.address;
+            }
         }
     }
-    return 'localhost';
+    return fallbackIP;
 }
 
 const PORT = 3000;
 server.listen(PORT, () => {
     const localUrl = `http://${getLocalIP()}:${PORT}`;
     console.log(`\n========================================`);
-    console.log(` Hallway Mafia Server Active!`);
-    console.log(` URL for phones: ${localUrl}`);
+    console.log(` Host Dashboard: ${localUrl}`);
+    console.log(` Player Join URL: ${localUrl}/player.html`);
     console.log(`========================================\n`);
-    qrcode.generate(localUrl, { small: true });
+    qrcode.generate(`${localUrl}/player.html`, { small: true });
 });

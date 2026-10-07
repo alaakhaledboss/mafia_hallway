@@ -3,162 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hallway Mafia Game</title>
+    <title>Mafia Host Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+<body class="bg-gray-950 text-gray-100 font-sans min-h-screen flex flex-col items-center justify-center p-4">
 
-    <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl">
-        <h1 class="text-3xl font-black text-center mb-6 text-red-600 tracking-wider">MAFIA</h1>
+    <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-6">
+        
+        <div class="flex justify-between items-center border-b border-gray-800 pb-4">
+            <h1 class="text-xl font-black text-red-500 tracking-wider">MAFIA HOST DASHBOARD</h1>
+            <span id="game-status" class="px-3 py-1 bg-red-950 text-red-400 text-xs font-bold rounded-full uppercase">LOBBY</span>
+        </div>
 
-        <!-- View 1: Join Screen -->
-        <div id="join-view" class="space-y-4">
-            <p class="text-sm text-gray-400 text-center">Enter your name to join the game session.</p>
-            <input type="text" id="nickname" placeholder="Your Nickname..." 
-                class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:border-red-500 text-white">
-            <button id="join-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 font-bold rounded-xl transition shadow-lg">
-                Join Lobby
+        <div>
+            <h2 class="text-xs font-bold text-gray-400 uppercase mb-2">Connected Players (<span id="player-count">0</span>)</h2>
+            <div id="players-list" class="space-y-2 max-h-40 overflow-y-auto pr-1">
+                <!-- Players injected here -->
+            </div>
+        </div>
+
+        <div id="config-section" class="space-y-4 pt-4 border-t border-gray-800">
+            <h2 class="text-xs font-bold text-red-400 uppercase">Game Rules Setup</h2>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Number of Mafia:</label>
+                <input type="number" id="mafia-count" min="1" value="1" class="w-full bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-red-500">
+            </div>
+            <div class="flex items-center space-x-2 space-x-reverse">
+                <input type="checkbox" id="include-doctor" checked class="w-4 h-4 accent-red-500 rounded bg-gray-950 border-gray-800">
+                <label for="include-doctor" class="text-sm text-gray-300">Include Doctor 🩺</label>
+            </div>
+            <button id="start-btn" class="w-full py-3 bg-red-600 hover:bg-red-700 font-bold rounded-xl text-sm transition shadow-lg shadow-red-900/30">
+                Start Game & Assign Roles
             </button>
         </div>
 
-        <!-- View 2: Lobby & Host Setup Screen -->
-        <div id="lobby-view" class="hidden space-y-4">
-            <div class="flex justify-between items-center border-b border-gray-800 pb-2">
-                <h2 class="text-lg font-semibold text-gray-300">Connected Players</h2>
-                <span id="player-count" class="text-xs bg-gray-800 px-2 py-1 rounded-full text-red-400 font-mono">0</span>
-            </div>
-            <ul id="player-list" class="space-y-2 max-h-36 overflow-y-auto"></ul>
-
-            <!-- Host Controls (Only visible to host) -->
-            <div id="host-controls" class="hidden space-y-3 pt-3 border-t border-gray-800">
-                <h3 class="text-xs font-bold text-red-500 uppercase tracking-widest">Game Setup (Host Only)</h3>
-                <div>
-                    <label class="text-xs text-gray-400">Number of Mafia:</label>
-                    <input type="number" id="mafia-count" value="1" min="1" max="4" class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
-                </div>
-                <div class="flex items-center space-x-3">
-                    <input type="checkbox" id="include-doctor" checked class="w-4 h-4 accent-red-600">
-                    <label class="text-sm text-gray-300">Include Doctor 🩺</label>
-                </div>
-                <div class="flex items-center space-x-3">
-                    <input type="checkbox" id="include-detective" class="w-4 h-4 accent-red-600">
-                    <label class="text-sm text-gray-300">Include Detective 🔍</label>
-                </div>
-                <button id="start-game-btn" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 font-bold rounded-xl transition shadow-lg mt-2">
-                    Start Game & Assign Roles
-                </button>
-            </div>
-            <p id="waiting-host-msg" class="text-xs text-center text-gray-500 pt-2">Waiting for host to start...</p>
+        <!-- Day Flow Controls for Host -->
+        <div id="day-controls" class="hidden space-y-3 pt-4 border-t border-gray-800">
+            <h2 class="text-xs font-bold text-yellow-400 uppercase">Day Phase Controls</h2>
+            <button id="start-discussion-btn" class="w-full py-2 bg-blue-600 hover:bg-blue-700 font-bold rounded-xl text-xs transition">
+                Start Discussion (Pass the Mic) 🎤
+            </button>
+            <button id="start-voting-btn" class="w-full py-2 bg-purple-600 hover:bg-purple-700 font-bold rounded-xl text-xs transition">
+                Start Daytime Voting ⚖️
+            </button>
         </div>
 
-        <!-- View 3: Game / Night / Day Action Screen -->
-        <div id="game-view" class="hidden space-y-4 text-center">
-            <div id="role-box" class="p-4 bg-gray-800/60 border border-gray-700 rounded-xl">
-                <h3 class="text-xs text-gray-400 uppercase tracking-widest">Your Secret Role</h3>
-                <p id="my-role" class="text-2xl font-extrabold mt-1 text-red-500"></p>
-            </div>
-            
-            <div id="action-container" class="space-y-3 pt-2">
-                <!-- Dynamically injected action interfaces (Mafia target selection, Doctor healing, Voting) -->
-            </div>
+        <div id="result-container" class="hidden pt-4 border-t border-gray-800 text-center">
+            <span class="text-xs font-bold text-gray-400 uppercase">Live Phase Result</span>
+            <div id="result-message" class="mt-2 text-sm text-yellow-400 font-semibold bg-gray-950 p-3 rounded-xl border border-gray-800"></div>
         </div>
+
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
 
-        const joinView = document.getElementById('join-view');
-        const lobbyView = document.getElementById('lobby-view');
-        const gameView = document.getElementById('game-view');
-        
-        const nicknameInput = document.getElementById('nickname');
-        const joinBtn = document.getElementById('join-btn');
-        const playerList = document.getElementById('player-list');
+        const gameStatus = document.getElementById('game-status');
         const playerCount = document.getElementById('player-count');
-        const hostControls = document.getElementById('host-controls');
-        const startGameBtn = document.getElementById('start-game-btn');
-        const waitingHostMsg = document.getElementById('waiting-host-msg');
-        
-        const myRole = document.getElementById('my-role');
-        const actionContainer = document.getElementById('action-container');
+        const playersList = document.getElementById('players-list');
+        const configSection = document.getElementById('config-section');
+        const startBtn = document.getElementById('start-btn');
+        const dayControls = document.getElementById('day-controls');
+        const resultContainer = document.getElementById('result-container');
+        const resultMessage = document.getElementById('result-message');
 
-        let isHost = false;
-        let myAssignedRole = '';
-
-        joinBtn.addEventListener('click', () => {
-            const name = nicknameInput.value.trim();
-            if (!name) return alert('Please enter your nickname!');
-            socket.emit('join_game', name);
-            joinView.classList.add('hidden');
-            lobbyView.classList.remove('hidden');
-        });
-
-        socket.on('set_host', () => {
-            isHost = true;
-            hostControls.classList.remove('hidden');
-            waitingHostMsg.classList.add('hidden');
-        });
-
-        socket.on('update_lobby', (data) => {
-            playerList.innerHTML = '';
-            data.players.forEach(p => {
-                const li = document.createElement('li');
-                li.className = 'bg-gray-800/80 px-3 py-2 rounded-lg text-sm flex justify-between';
-                li.innerHTML = `<span>${p.name}</span>`;
-                playerList.appendChild(li);
-            });
+        socket.on('state_update', (data) => {
+            gameStatus.textContent = data.gameState;
             playerCount.textContent = data.players.length;
-        });
 
-        startGameBtn.addEventListener('click', () => {
-            const config = {
-                mafiaCount: document.getElementById('mafia-count').value,
-                includeDoctor: document.getElementById('include-doctor').checked,
-                includeDetective: document.getElementById('include-detective').checked
-            };
-            socket.emit('start_game_config', config);
-        });
+            playersList.innerHTML = '';
+            data.players.forEach(p => {
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center bg-gray-950 px-3 py-2 rounded-xl border border-gray-800 text-xs';
+                div.innerHTML = `<span class="${p.isAlive ? '' : 'line-through text-gray-500'}">${p.name}</span> <span class="text-gray-500">${p.isAlive ? 'In Game' : 'Dead'}</span>`;
+                playersList.appendChild(div);
+            });
 
-        socket.on('your_role', (data) => {
-            myAssignedRole = data.role;
-            lobbyView.classList.add('hidden');
-            gameView.classList.remove('hidden');
-            myRole.textContent = data.role;
-        });
+            // Disable configuration once game starts
+            if (data.gameState !== 'LOBBY') {
+                startBtn.disabled = true;
+                startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
 
-        socket.on('phase_change', (data) => {
-            actionContainer.innerHTML = '';
-            if (socket.state === 'NIGHT_MAFIA' && myAssignedRole === 'Mafia') {
-                actionContainer.innerHTML = `<h4 class="text-sm font-bold text-red-500">Night Phase: Choose a target to eliminate</h4>`;
-                data.livingPlayers.forEach(p => {
-                    const btn = document.createElement('button');
-                    btn.className = 'w-full py-2 bg-gray-800 hover:bg-red-900 rounded-lg text-sm mb-2';
-                    btn.textContent = `Eliminate ${p.name}`;
-                    btn.onclick = () => socket.emit('mafia_action', { targetId: p.id, action: 'kill' });
-                    actionContainer.appendChild(btn);
-                });
-            } else if (socket.state === 'NIGHT_DOCTOR' && myAssignedRole === 'Doctor') {
-                actionContainer.innerHTML = `<h4 class="text-sm font-bold text-emerald-400">Night Phase: Choose someone to heal</h4>`;
-                data.livingPlayers.forEach(p => {
-                    const btn = document.createElement('button');
-                    btn.className = 'w-full py-2 bg-gray-800 hover:bg-emerald-900 rounded-lg text-sm mb-2';
-                    btn.textContent = `Heal ${p.name}`;
-                    btn.onclick = () => socket.emit('doctor_action', p.id);
-                    actionContainer.appendChild(btn);
-                });
+            // Show host day controls during night results or discussion
+            if (data.gameState === 'NIGHT_RESULTS' || data.gameState === 'DAY_DISCUSSION') {
+                dayControls.classList.remove('hidden');
             } else {
-                actionContainer.innerHTML = `<p class="text-sm text-gray-400">Waiting for other night actions...</p>`;
+                dayControls.classList.add('hidden');
             }
         });
 
+        startBtn.onclick = () => {
+            const mafiaCount = document.getElementById('mafia-count').value;
+            const includeDoctor = document.getElementById('include-doctor').checked;
+            socket.emit('start_game_config', { mafiaCount, includeDoctor });
+        };
+
+        document.getElementById('start-discussion-btn').onclick = () => socket.emit('start_discussion');
+        document.getElementById('start-voting-btn').onclick = () => socket.emit('start_voting');
+
         socket.on('night_summary', (data) => {
-            actionContainer.innerHTML = `
-                <div class="p-4 bg-gray-800 rounded-xl space-y-2">
-                    <h4 class="text-xs uppercase text-gray-400">Night Results</h4>
-                    <p class="text-lg font-bold text-yellow-400">${data.message}</p>
-                </div>
-            `;
+            resultContainer.classList.remove('hidden');
+            resultMessage.textContent = data.message;
+        });
+
+        socket.on('voting_summary', (data) => {
+            resultContainer.classList.remove('hidden');
+            resultMessage.textContent = data.message;
         });
     </script>
 </body>
